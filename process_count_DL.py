@@ -63,7 +63,7 @@ rawDF = pd.concat(raw_dfs, axis=1)
 tpmDF = pd.concat(tpm_dfs, axis=1)
 fpkmDF = pd.concat(fpkm_dfs, axis=1)
 
-# save data
+# save data as raw counts, tpm normalized, fpkm normalized, and the meta data files
 rawDF.to_csv('star_counts/raw_counts_test.csv')
 tpmDF.to_csv('star_counts/tpm_counts_test.csv')
 fpkmDF.to_csv('star_counts/fpkm_counts_test.csv')
