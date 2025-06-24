@@ -45,3 +45,16 @@ dds.varm['dispersions'].head()
 #Statistical Analysis
 # Now that dispersions and LFCs have been calculated, stats can be calculated
 ds = DeseqStats(dds, contrast=["sample-type", "Solid Tissue Normal", "Primary Tumor"], inference=inference)
+ds.summary()
+ds.results_df.head()
+# Note: the L2FC values here follow X vs Y specified in dds.varm['LFC'], so negative l2FC means that
+# the gene is down regulated in the X case compared to the Y (here that would mean Solid Tissue Normal
+# has lower expression than Primary Tumor)
+
+# Now we have generated a DESeq dataframe with normalized counts, and a stats results dataframe with
+# significance values. Save both for future use, and in next steps we will can filter data using DES
+# significance values.
+ds.results_df.to_csv('star_counts/DESeq2_stats.csv')
+NormDF = pd.DataFrame(index=samples.index, columns=samples.columns, data=dds.layers['normed_counts'])
+NormDF.to_csv('star_counts/DESeq2_Norm.csv')
+trimMD.to_csv('star_counts/DESeq2_MetaData.csv')
