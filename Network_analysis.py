@@ -3,6 +3,7 @@
 import pandas as pd
 import numpy as np
 import networkx as nx
+import pickle
 
 ### Load data, DESeq stats, and sample metadata
 normDF = pd.read_csv('star_counts/DESeq2_Norm.csv', index_col=0)
@@ -36,8 +37,8 @@ corr_Mat[corr_Mat < .7] = 0
 
 # convert adjacency matrix to networkx graph
 G = nx.convert_matrix.from_numpy_array(corr_Mat)
-cliques = nx.find_cliques(G)
 
+connected_components = nx.connected_components(G)
 subgraphs = (G.subgraph(c) for c in connected_components)
 
 # discard the subgraphs with fewer than 5 members (this will be the majority of the subgraphs identified.)
@@ -66,7 +67,7 @@ for gNum in range(len(subgraphs)):
     graphDF.loc[ind, 'size'] = len(g_genes)
     graphDF.loc[ind, 'Prop.Upreg'] = sum(statsDF.loc[g_genes]["log2FoldChange"].values > 0)/len(g_genes)
     graphDF.loc[ind, 'Prop.Top1000LFC'] = (sum(np.abs(statsDF.loc[g_genes]["log2FoldChange"].values) > LFCThresh)/len(g_genes))
-    graphDF.loc[ind, 'Prop.Top1000padj'] = (sum(statsDF.loc[g_genes]["padj"].values > padjThresh)/len(g_genes))
+    graphDF.loc[ind, 'Prop.Top1000padj'] = (sum(statsDF.loc[g_genes]["padj"].values < padjThresh)/len(g_genes))
 
 # explanations for the metrics I chose to track
 # size: important for limiting the graphs we take into the next step, as larger graphs will be more computationally
@@ -78,7 +79,23 @@ for gNum in range(len(subgraphs)):
 # Prop.Top1000padj: a bit of a tie-breaker column, not intended to be the ultimate deciding factor, but could inform
 # the choice between close graphs.
 
-graphDF = graphDF.sort_values(by='Prop.Top1000LFC', ascending=False)
-graphDF.head()
-# based on the proportions in LFC and Prop.Upreg, g_9 and g_7 are promising, I will include g_1 as well because
-# it has an even mix between up and down regulated genes.
+# selecting graphs: I am planning to select one based on percent upregulated, one based on percent downregulated (0.0 in
+# Prop.UpReg), and then the graph with the greatest percent in top 1000 LFC
+
+graphDF = graphDF.sort_values(by='Prop.Upreg', ascending=False)
+graphUR = graphDF.sort_values(by='Prop.Upreg', ascending=False).index[0]
+graphDR = graphDF.sort_values(by='Prop.Upreg', ascending=True).index[0]
+graphLFC = graphDF.sort_values(by='Prop.Top1000LFC', ascending=False).index[0]
+
+# save the graphDF as a csv, then create a graph dictionary to save the subgraphs with the g_ label
+graphDF.to_csv('graphs/graphDataFrame.csv', index=False)
+
+graphDict = {}
+for gID in [graphUR, graphDR, graphLFC]:
+    graphDict[gID] = subgraphs[int(gID.split('_')[1])-1]
+
+with open("graphs/graph_dictionary.pkl", "wb") as f:
+    # Use pickle.dump() to write the dictionary to the file
+    pickle.dump(graphDict, f)
+
+# now the next steps will be to construct a GNN and construct graphs for each sample
