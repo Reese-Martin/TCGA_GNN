@@ -10,7 +10,7 @@ import pickle as pkl
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
-
+import random
 
 class GCN(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, num_classes):
@@ -70,18 +70,18 @@ for sample in samples:
                  y=torch.from_numpy(np.array(metadataDF.loc[sample, 'int_label'])).long())
     sample_graphs.append(graph)
 
-
 # Prepare loader, the loader groups graphs together to speed up the training process
 loader = DataLoader(sample_graphs, batch_size=16, shuffle=True)
 
 # Training loop (basic)
 model = GCN(in_channels=1, hidden_channels=64, num_classes=classCount)
-test = model.copy()  # tmp bug fixing copied the model to make sure the training was actually taking place
+# test = model.copy()  # tmp bug fixing, copied the model to make sure the training was actually taking place
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 loss_fn = torch.nn.CrossEntropyLoss()
 
-epochs = 1000
+epochs = 100
 loss_track = np.zeros((epochs, len(loader)))
+batchAcc = np.zeros((epochs, len(loader)))
 for epoch in range(epochs):
     BtchCnt = 0
     for batch in loader:
@@ -94,11 +94,58 @@ for epoch in range(epochs):
         pred = out.argmax(dim=1)
         correct = (pred == batch.y).sum().item()
         accuracy = correct / batch.y.size(0)
+        batchAcc[epoch, BtchCnt] = accuracy
         print(f'Accuracy: {accuracy:.2f}')
         loss_track[epoch, BtchCnt] = loss.item()
         BtchCnt = BtchCnt + 1
     print(f'Epoch {epoch+1}/{epochs}, Loss: {np.mean(loss_track[epoch, :])}')
 
-# note: model loss is low, and accuracy is high, but this is an artifact of having the dataset be severely biased
+# note: model loss is low, and accuracy is high, but this is likely an artifact of having the dataset be severely biased
 # The normal tissue is underrepresented by ~9:1 so the model is just always predicting that the graph is
-# tumor and accuracy is high because of that. We will fix that.
+# tumor and accuracy is high because of that.
+
+# let's see what happens when we subsample the tumor data to have the same number of samples as the normal tissue
+normalSamples = metadataDF[metadataDF['sample_type'] == 'Solid Tissue Normal'].index.tolist()
+TumorSamples = random.sample(metadataDF[(metadataDF['sample_type'] == 'Primary Tumor')].index.tolist(), len(normalSamples))
+
+subSamples = normalSamples+TumorSamples
+subSample_graphs = []
+for sample in subSamples:
+    # [num_nodes, 1], in the future node features could be added as additional columns
+    node_feats = torch.tensor(upregGraphGenes.loc[sample].values, dtype=torch.float).unsqueeze(1)
+
+    graph = Data(x=node_feats, edge_index=edge_template,
+                 y=torch.from_numpy(np.array(metadataDF.loc[sample, 'int_label'])).long())
+    subSample_graphs.append(graph)
+
+# Prepare loader, the loader groups graphs together to speed up the training process
+loader = DataLoader(subSample_graphs, batch_size=16, shuffle=True)
+
+# Training loop (basic)
+model = GCN(in_channels=1, hidden_channels=64, num_classes=classCount)
+# test = model.copy()  # tmp bug fixing, copied the model to make sure the training was actually taking place
+optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+loss_fn = torch.nn.CrossEntropyLoss()
+
+epochs = 1000
+loss_track = np.zeros((epochs, len(loader)))
+batchAcc = np.zeros((epochs, len(loader)))
+for epoch in range(epochs):
+    BtchCnt = 0
+    for batch in loader:
+        out = model(batch.x, batch.edge_index, batch.batch)
+        loss = loss_fn(out, batch.y)
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+        # measure accuracy
+        pred = out.argmax(dim=1)
+        correct = (pred == batch.y).sum().item()
+        accuracy = correct / batch.y.size(0)
+        batchAcc[epoch, BtchCnt] = accuracy
+        print(f'Accuracy: {accuracy:.2f}')
+        loss_track[epoch, BtchCnt] = loss.item()
+        BtchCnt = BtchCnt + 1
+    print(f'Epoch {epoch+1}/{epochs}, Loss: {np.mean(loss_track[epoch, :])}')
+
+# well the training is much clearer now, but now accuracy and loss are pretty consistently bad
