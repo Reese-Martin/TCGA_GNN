@@ -88,7 +88,7 @@ graphDR = graphDF.sort_values(by='Prop.Upreg', ascending=True).index[0]
 graphLFC = graphDF.sort_values(by='Prop.Top1000LFC', ascending=False).index[0]
 
 # save the graphDF as a csv, then create a graph dictionary to save the subgraphs with the g_ label
-graphDF.to_csv('graphs/graphDataFrame.csv', index=False)
+graphDF.to_csv('graphs/graphDataFrame.csv', index=True)
 
 graphDict = {}
 for gID in [graphUR, graphDR, graphLFC]:

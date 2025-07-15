@@ -10,8 +10,9 @@ import pickle as pkl
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
+from sklearn.utils.class_weight import compute_class_weight
 import random
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+# from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
 
 class GCN(torch.nn.Module):
@@ -76,10 +77,10 @@ def model_training(model, loader, optimizer, loss_fn, epochs):
             correct = (pred == batch.y).sum().item()
             accuracy = correct / batch.y.size(0)
             batchAcc[epoch, BtchCnt] = accuracy
-            print(f'Accuracy: {accuracy:.2f}')
             loss_track[epoch, BtchCnt] = loss.item()
             BtchCnt = BtchCnt + 1
         print(f'Epoch {epoch + 1}/{epochs}, Loss: {np.mean(loss_track[epoch, :])}')
+        print(f'Accuracy: {np.mean(batchAcc[epoch,:]):.2f}')
 
     return loss_track, batchAcc
 
@@ -92,6 +93,7 @@ graphDF = pd.read_csv('graphs/graphDataFrame.csv', index_col=0)
 metadataDF = pd.read_csv('star_counts/DESeq2_MetaData.csv', index_col=0)
 normExpDF = pd.read_csv('star_counts/DESeq2_Norm.csv', index_col=0)
 
+
 # training for upregulated network
 upregGraph = graph_dict[list(graph_dict.keys())[0]]
 upregGraphGenes = normExpDF.iloc[:, list(upregGraph.nodes)]
@@ -100,31 +102,67 @@ samples = normExpDF.index.values
 # for each sample build a graph with gene expression data as node data
 upreg_sample_graphs, classNum = prepare_graphs(upregGraph, samples, upregGraphGenes, metadataDF)
 
+# Get the unique classes
+classes = np.unique(metadataDF['int_label'])
+weights = compute_class_weight(class_weight='balanced', classes=classes, y=metadataDF['int_label'])
+
+# Convert to tensor
+class_weights = torch.tensor(weights, dtype=torch.float)
+
 # Prepare loader, (the loader groups graphs together to speed up the training process)
 upreg_loader = DataLoader(upreg_sample_graphs, batch_size=16, shuffle=True)
 
 # Model definition and training parameters
 upreg_model = GCN(in_channels=1, hidden_channels=64, num_classes=classNum)
-optimizer = torch.optim.Adam(upreg_model.parameters(), lr=0.01)
+optimizer = torch.optim.Adam(upreg_model.parameters(), lr=1e-3)
 loss_fn = torch.nn.CrossEntropyLoss()
-epochs = 100
+epochs = 1000
 
 upRegLoss, upRegAcc = model_training(upreg_model, upreg_loader, optimizer, loss_fn, epochs)
-y_true = metadataDF['int_label'].values
 
-# note: model loss is low, and accuracy is high, but this is likely an artifact of having the dataset be severely biased
-# The normal tissue is underrepresented by ~9:1 so the model is just always predicting that the graph is
-# tumor and accuracy is high because of that.
+# note: model loss is low, and accuracy is high, but this could be an artifact of having the dataset be severely biased
+# The normal tissue is underrepresented by ~9:1 so the model seems to be always predicting that the graph is
+# tumor and accuracy is high because of that (note that accuracy sits at .9 for several hundred generations)
 
-# let's see what happens when we subsample the tumor data to have the same number of samples as the normal tissue
-normalSamples = metadataDF[metadataDF['sample_type'] == 'Solid Tissue Normal'].index.tolist()
-TumorSamples = random.sample(metadataDF[(metadataDF['sample_type'] == 'Primary Tumor')].index.tolist(), len(normalSamples))
-subSamples = normalSamples+TumorSamples
+# let's see what happens when we use a weighted loss function
+# Get the unique classes
+classes = np.unique(metadataDF['int_label'])
+weights = compute_class_weight(class_weight='balanced', classes=classes, y=metadataDF['int_label'])
+# Convert to tensor
+class_weights = torch.tensor(weights, dtype=torch.float)
+
+wloss_fn = torch.nn.CrossEntropyLoss(weight=class_weights)
+upreg_w_model = GCN(in_channels=1, hidden_channels=64, num_classes=classNum)
+epochs = 1000
+upRegLoss_w, upRegAcc_w = model_training(upreg_w_model, upreg_loader, optimizer, wloss_fn, epochs)
+
+# It seems that even class weighting isn't enough to push the models towards correctly classifying the minority
+# class, although it did serve the purpose of making the loss spectacularly high. I will evaluate the other 2 networks
+# saved, but may need to go back to the graph construction drawing board or find more normal samples
+# (I would like to avoid other class balancing efforts like SMOTE for now)
+
+# training for downregulated networks
+dregGraph = graph_dict[list(graph_dict.keys())[1]]
+dregGraphGenes = normExpDF.iloc[:, list(dregGraph.nodes)]
 
 # for each sample build a graph with gene expression data as node data
-upreg_bal_sample_graphs, classNum = prepare_graphs(upregGraph, subSamples, upregGraphGenes, metadataDF)
-upreg_bal_loader = DataLoader(upreg_bal_sample_graphs, batch_size=16, shuffle=True)
-upreg_bal_model = GCN(in_channels=1, hidden_channels=64, num_classes=classNum)
-epochs = 1000
-upRegLoss_bal, upRegAcc_bal = model_training(upreg_bal_model, upreg_bal_loader, optimizer, loss_fn, epochs)
+dreg_sample_graphs, classNum = prepare_graphs(dregGraph, samples, dregGraphGenes, metadataDF)
+dreg_loader = DataLoader(dreg_sample_graphs, batch_size=16, shuffle=True)
 
+dreg_w_model = GCN(in_channels=1, hidden_channels=64, num_classes=classNum)
+epochs = 1000
+dRegLoss_w, dRegAcc_w = model_training(dreg_w_model, dreg_loader, optimizer, wloss_fn, epochs)
+
+# training for LFC networks
+LFCregGraph = graph_dict[list(graph_dict.keys())[2]]
+LFCregGraphGenes = normExpDF.iloc[:, list(dregGraph.nodes)]
+
+# for each sample build a graph with gene expression data as node data
+LFCreg_sample_graphs, classNum = prepare_graphs(LFCregGraph, samples, LFCregGraphGenes, metadataDF)
+LFCreg_loader = DataLoader(LFCreg_sample_graphs, batch_size=16, shuffle=True)
+
+LFCreg_w_model = GCN(in_channels=1, hidden_channels=64, num_classes=classNum)
+epochs = 1000
+LFCRegLoss_w, LFCRegAcc_w = model_training(LFCreg_w_model, LFCreg_loader, optimizer, wloss_fn, epochs)
+
+# seems that there were no magic bullets in the other graphs (very similar accuracies and log losses.)
