@@ -65,10 +65,10 @@ def process_count_data(counts_folder, metaDF):
     fpkmDF = pd.concat(fpkm_dfs, axis=1)
 
     # save data as raw counts, tpm normalized, fpkm normalized, and the meta data files
-    rawDF.to_csv(counts_folder + '/raw_counts_test.csv')
-    tpmDF.to_csv(counts_folder + '/tpm_counts_test.csv')
-    fpkmDF.to_csv(counts_folder + '/fpkm_counts_test.csv')
-    trim_metadata.to_csv(counts_folder + '/trim_metadata_test.csv', index=False)
+    rawDF.to_csv(counts_folder + '/raw_counts.csv')
+    tpmDF.to_csv(counts_folder + '/tpm_counts.csv')
+    fpkmDF.to_csv(counts_folder + '/fpkm_counts.csv')
+    trim_metadata.to_csv(counts_folder + '/trim_metadata.csv', index=False)
 
 
 counts_folder = 'STN_star_counts'
